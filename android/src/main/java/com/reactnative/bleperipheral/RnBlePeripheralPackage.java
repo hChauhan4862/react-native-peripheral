@@ -17,7 +17,7 @@ public class RnBlePeripheralPackage implements ReactPackage {
 
   @Override
   public List<NativeModule> createNativeModules(ReactApplicationContext reactContext) {
-    List<BLEServer> modules = new ArrayList<>();
+    List<NativeModule> modules = new ArrayList<>();
     modules.add(new RnBlePeripheralModule(reactContext));
     return modules;
   }
