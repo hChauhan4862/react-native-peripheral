@@ -1,4 +1,5 @@
 import {
+  Platform,
   NativeEventEmitter,
   NativeModules,
   EventSubscription,
@@ -9,12 +10,42 @@ import Characteristic from './Characteristic'
 const { RNBlePeripheral } = NativeModules
 const EventEmitter = new NativeEventEmitter(RNBlePeripheral)
 
+const READ_REQUEST = "BlePeripheral:ReadRequest"
+const STATE_CHANGED = "BlePeripheral:StateChanged"
+const SUBSCRIBED = "BlePeripheral:Subscribed"
+const UNSUBSCRIBED = "BlePeripheral:Unsubscribed"
+const WRITE_REQUEST = "BlePeripheral:WriteRequest"
+const LOGGER = "BlePeripheral:Logger"
+
 export default class Manager {
   private characteristics: { [uuid: string]: Characteristic } = {}
   private readRequestListener?: EventSubscription
   private subscribeListener?: EventSubscription
   private unsubscribeListener?: EventSubscription
   private writeRequestListener?: EventSubscription
+  private logSubscription?: EventSubscription
+
+  constructor() {
+    EventEmitter.removeAllListeners(READ_REQUEST)
+    EventEmitter.removeAllListeners(STATE_CHANGED)
+    EventEmitter.removeAllListeners(SUBSCRIBED)
+    EventEmitter.removeAllListeners(UNSUBSCRIBED)
+    EventEmitter.removeAllListeners(WRITE_REQUEST)
+    EventEmitter.removeAllListeners(LOGGER)
+    
+    // Subscribe to logger event
+    this.logSubscription = EventEmitter.addListener(
+      LOGGER, 
+      (params: {
+        message: string
+      }) => {
+        console.log(params.message); // Log the message received from native module
+      }
+    );
+
+    console.log("Called manager constructor ----")
+    RNBlePeripheral.testLog("TESTING LOG")
+  }
 
   /**
    * Add service, along with its characteristics and nested services, to the peripheral.
@@ -24,7 +55,22 @@ export default class Manager {
    * _[iOS]_ After you add a service to the peripheral’s local database, Core Bluetooth caches the service and you can no longer make changes to it.
    */
   async addService(service: Service): Promise<void> {
-    await RNBlePeripheral.addService(service)
+    if(Platform.OS === 'android') {
+      const serviceMap = {
+        uuid: service.uuid,
+        characteristics: service.characteristics?.map(characteristic => ({
+            uuid: characteristic.uuid,
+            value: characteristic.value,
+            properties: characteristic.properties,
+            permissions: characteristic.permissions,
+        }))
+      };
+      console.log("ServiceMap: " + JSON.stringify(serviceMap));
+      await RNBlePeripheral.addService(serviceMap)
+    }
+    else if(Platform.OS === 'ios') {
+      await RNBlePeripheral.addService(service)
+    }
 
     this.characteristics = {
       ...this.characteristics,
@@ -72,7 +118,7 @@ export default class Manager {
     await RNBlePeripheral.startAdvertising(data)
 
     this.readRequestListener = EventEmitter.addListener(
-      RNBlePeripheral.READ_REQUEST,
+      READ_REQUEST,
       (params: {
         requestId: string
         characteristicUuid: string
@@ -94,7 +140,7 @@ export default class Manager {
     )
 
     this.writeRequestListener = EventEmitter.addListener(
-      RNBlePeripheral.WRITE_REQUEST,
+      WRITE_REQUEST,
       (params: {
         requestId: string
         characteristicUuid: string
@@ -117,7 +163,7 @@ export default class Manager {
     )
 
     this.subscribeListener = EventEmitter.addListener(
-      RNBlePeripheral.SUBSCRIBED,
+      SUBSCRIBED,
       (params: { characteristicUuid: string; centralUuid: string }) => {
         const ch = this.characteristics[params.characteristicUuid.toLowerCase()]
         if (ch) ch.onSubscribe()
@@ -125,7 +171,7 @@ export default class Manager {
     )
 
     this.unsubscribeListener = EventEmitter.addListener(
-      RNBlePeripheral.UNSUBSCRIBED,
+      UNSUBSCRIBED,
       (params: { characteristicUuid: string; centralUuid: string }) => {
         const ch = this.characteristics[params.characteristicUuid.toLowerCase()]
         if (ch) ch.onUnsubscribe()
@@ -157,6 +203,17 @@ export default class Manager {
   }
 
   /**
+   * An integer value that indicates the negotiated mtu.
+   *
+   */
+  getMtu(): Promise<number> {
+    if (Platform.OS === 'android') {
+      return RNBlePeripheral.getNegociatedMtu()
+    }
+    return Promise.resolve(43)
+  }
+
+  /**
    * Implement this method to ensure that Bluetooth low energy is available to use on the local peripheral device.
    *
    * Issue commands to the peripheral manager only when it's in the `poweredOn` state.
@@ -165,7 +222,7 @@ export default class Manager {
    */
   onStateChanged(listener: (state: ManagerState) => void) {
     RNBlePeripheral.getState().then(listener)
-    return EventEmitter.addListener(RNBlePeripheral.STATE_CHANGED, listener)
+    return EventEmitter.addListener(STATE_CHANGED, listener)
   }
 }
 
