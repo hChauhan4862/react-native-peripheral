@@ -31,20 +31,22 @@ export default class Manager {
     EventEmitter.removeAllListeners(SUBSCRIBED)
     EventEmitter.removeAllListeners(UNSUBSCRIBED)
     EventEmitter.removeAllListeners(WRITE_REQUEST)
-    EventEmitter.removeAllListeners(LOGGER)
     
-    // Subscribe to logger event
-    this.logSubscription = EventEmitter.addListener(
-      LOGGER, 
-      (params: {
-        message: string
-      }) => {
-        console.log(params.message); // Log the message received from native module
-      }
-    );
+    if (Platform.OS === 'android'){
+      EventEmitter.removeAllListeners(LOGGER)
+      // Subscribe to logger event
+      this.logSubscription = EventEmitter.addListener(
+        LOGGER, 
+        (params: {
+          message: string
+        }) => {
+          console.log(params.message); // Log the message received from native module
+        }
+      );
+      RNBlePeripheral.testLog("TESTING LOG FROM RNBlePeripheral");
+    }
 
     console.log("Called manager constructor ----")
-    RNBlePeripheral.testLog("TESTING LOG")
   }
 
   /**
@@ -65,7 +67,6 @@ export default class Manager {
             permissions: characteristic.permissions,
         }))
       };
-      console.log("ServiceMap: " + JSON.stringify(serviceMap));
       await RNBlePeripheral.addService(serviceMap)
     }
     else if(Platform.OS === 'ios') {

@@ -1,4 +1,4 @@
-package com.reactnative.peripheral;
+package com.reactnative.bleperipheral;
 
 import com.facebook.react.bridge.NativeModule;
 import com.facebook.react.bridge.ReactContext;
@@ -28,13 +28,13 @@ import android.content.Context;
 import android.os.Handler;
 import android.bluetooth.*;
 import android.bluetooth.le.*;
-import android.bluetooth.BluetoothStatusCodes;
 import android.os.ParcelUuid;
 import android.util.Base64;
 import androidx.lifecycle.LiveData;
 import androidx.lifecycle.MutableLiveData;
 import java.lang.reflect.Method;
 import java.nio.file.ProviderMismatchException;
+import java.lang.String;
 import java.io.UnsupportedEncodingException;
 
 import java.sql.Timestamp;
@@ -49,51 +49,53 @@ public class RNBlePeripheral extends ReactContextBaseJavaModule {
     public static final String UNSUBSCRIBED = "BlePeripheral:Unsubscribed";
     public static final String WRITE_REQUEST = "BlePeripheral:WriteRequest";
     public static final String LOGGER = "BlePeripheral:Logger";
-
-    private Context context;
-    private BluetoothAdapter mBluetoothAdapter;
-    private BluetoothLeAdvertiser mBluetoothAdvertiser;
-    private AdvertiseCallback advertiseCallback;
-    private AdvertiseSettings advertiseSettings;
-    private AdvertiseData advertiseData;
-    private AdvertiseData scanResponse;
-
     private final UUID descriptor_uuid = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb");
 
-    private MutableLiveData _deviceConnection = new MutableLiveData<Boolean>();
-    private LiveData deviceConnection = (LiveData<Boolean>) _deviceConnection;
-
-    private BluetoothGattServerCallback gattServerCallback;
-    private BluetoothGatt gattClient;
-    private BluetoothGattCallback gattClientCallback;
-
     private ReactContext ctx;
-    private ReactContext RCtx;
+    private Context context;
+
+    private BluetoothAdapter mBluetoothAdapter;
+    private BluetoothLeAdvertiser mBluetoothAdvertiser;
+    private BluetoothGattServerCallback gattServerCallback;
+    private AdvertiseCallback advertiseCallback;
+
+
+    private MutableLiveData _deviceConnection = new MutableLiveData<Boolean>();
+
+
     
     private class State {
         boolean isConnected = false;
         boolean isAdvertising = false;
         BluetoothDevice connectedDevice = null;
-        BluetoothGatt gatt = null;
         BluetoothGattServer gattServer;
         Callback callback = null;
         UUID SERVICE_UUID = null;
         int negociatedMtu = 23;
         boolean isComplete = true;
-        BluetoothManager bluetoothManager;
+        BluetoothManager bluetoothManager = null;
     }
 
-    private State state;
+    private State state = null;
 
     public RNBlePeripheral(ReactApplicationContext reactContext) {
         super(reactContext);
         this.ctx = reactContext;
         this.context = reactContext.getApplicationContext();
+        this.reset();
+    }
+    
+    private void reset() {
         this.mBluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
         this.gattServerCallback = null;
-        this.gattClient = null;
-        this.gattClientCallback = null;
+        stopServer();
         this.state = new State();
+    }
+
+    private void stopServer() {
+        if (state != null && state.gattServer != null){
+            state.gattServer.close();
+        }
     }
 
     @Override
@@ -113,113 +115,6 @@ public class RNBlePeripheral extends ReactContextBaseJavaModule {
         WritableMap eventParams = Arguments.createMap();
         eventParams.putString("message", message);
         sendEvent(LOGGER, eventParams);
-    }
-
-    public class GattServerCallback extends BluetoothGattServerCallback {
-        @Override
-        public void onConnectionStateChange(BluetoothDevice device, int status, int newState) {
-            super.onConnectionStateChange(device, status, newState);
-            boolean isSuccess = status == BluetoothGatt.GATT_SUCCESS;
-            boolean isConnected = newState == BluetoothProfile.STATE_CONNECTED;
-            if (isSuccess && isConnected) {
-                __log("Connected to device ");
-                state.isConnected = true;
-                state.connectedDevice = device;
-                setCurrentDeviceConnected(device);
-
-                WritableMap eventParams = Arguments.createMap();
-                eventParams.putString("message", "device is connected");
-                sendEvent(STATE_CHANGED, eventParams);
-
-            } else {
-                _deviceConnection.postValue(false);
-            }
-        }
-
-        @Override
-        public void onCharacteristicReadRequest(BluetoothDevice device, int requestId, int offset, BluetoothGattCharacteristic characteristic) {
-            super.onCharacteristicReadRequest(device, requestId, offset, characteristic);
-            __log("Characteristic read request");
-            WritableMap eventParams = Arguments.createMap();
-            eventParams.putString("requestId", Integer.toString(requestId));
-            eventParams.putString("characteristicUuid", characteristic.getUuid().toString());
-            eventParams.putInt("offset", offset);
-
-            sendEvent(READ_REQUEST, eventParams);
-            state.gattServer.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, characteristic.getValue());
-        }
-
-        @Override
-        public void onCharacteristicWriteRequest(BluetoothDevice device, int requestId, BluetoothGattCharacteristic characteristic, boolean preparedWrite, boolean responseNeeded, int offset, byte[] value) {
-            super.onCharacteristicWriteRequest(device, requestId, characteristic, preparedWrite, responseNeeded, offset, value);
-            WritableMap eventParams = Arguments.createMap();
-            eventParams.putString("requestId", Integer.toString(requestId));
-            eventParams.putString("characteristicUuid", characteristic.getUuid().toString());
-            eventParams.putString("value", Base64.encodeToString(value, Base64.NO_WRAP));
-            eventParams.putInt("offset", offset);
-            sendEvent(WRITE_REQUEST, eventParams);
-        }
-
-        @Override
-        public void onDescriptorWriteRequest(BluetoothDevice device, int requestId, BluetoothGattDescriptor descriptor, boolean preparedWrite, boolean responseNeeded, int offset, byte[] value) {
-            super.onDescriptorWriteRequest(device, requestId, descriptor, preparedWrite, responseNeeded, offset, value);
-            
-            WritableMap eventParams = Arguments.createMap();
-            eventParams.putString("characteristicUuid", descriptor.getUuid().toString());
-            eventParams.putString("centralUuid", device.toString());
-            if (Arrays.equals(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE, value)) {
-                sendEvent(SUBSCRIBED, eventParams);
-            } else if (Arrays.equals(BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE, value)) {
-                sendEvent(UNSUBSCRIBED, eventParams);
-            }
-            state.gattServer.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null);
-        }
-
-        @Override
-        public void onNotificationSent(BluetoothDevice device, int status){
-            super.onNotificationSent(device, status);
-            try {
-                __log( "Notification sent, " + status);
-                state.isComplete = true;
-            } catch(Exception e) {
-                __log( "Error catch onNotificationSent");
-            }
-        }
-
-        /*** */
-        @Override
-        public void onMtuChanged(BluetoothDevice device, int mtu){
-            super.onMtuChanged(device, mtu);
-
-            __log("Negociated Mtu: " + mtu);
-            state.negociatedMtu = mtu;
-        }
-
-    }
-
-    public class GattClientCallback extends BluetoothGattCallback {
-
-        @Override 
-        public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
-            super.onConnectionStateChange(gatt, status, newState);
-            __log("Gatt Client on connection state change --- ");
-            boolean isSuccess = status == BluetoothGatt.GATT_SUCCESS;
-            boolean isConnected = newState == BluetoothProfile.STATE_CONNECTED;
-            if (isSuccess && isConnected) {
-                gatt.discoverServices();
-            }
-        }
-
-        @Override
-        public void onServicesDiscovered(BluetoothGatt discoveredGatt, int status) {
-            super.onServicesDiscovered(discoveredGatt, status);
-            __log("Gatt Client on service discovered --- ");
-            if (status == BluetoothGatt.GATT_SUCCESS) {
-                state.gatt = discoveredGatt;
-                BluetoothGattService service = state.gatt.getService(state.SERVICE_UUID);
-            }
-        }
-
     }
 
     private int getPropertyFlags(List<String> properties) {
@@ -268,10 +163,9 @@ public class RNBlePeripheral extends ReactContextBaseJavaModule {
     }
 
     private void setCurrentDeviceConnected(BluetoothDevice device) {
-        BluetoothDevice currentDevice = device;
         _deviceConnection.postValue(true);
-        GattClientCallback gattClientCallback = new GattClientCallback();
-        this.gattClient = device.connectGatt(this.context, false, gattClientCallback);
+        // this.gattClientCallback = new GattClientCallback();
+        // this.gattClient = device.connectGatt(this.context, false, this.gattClientCallback);
         __log("Connecting to device.....");
     }
 
@@ -292,21 +186,21 @@ public class RNBlePeripheral extends ReactContextBaseJavaModule {
 
     @ReactMethod
     public void getNegociatedMtu(Promise promise) {
-        __log("getMtu called: " + state.negociatedMtu);
-        promise.resolve(state.negociatedMtu);
+        __log("getMtu called: " + this.state.negociatedMtu);
+        promise.resolve(this.state.negociatedMtu);
     }
 
     @ReactMethod
     public void getState(Promise promise) {
-        if (mBluetoothAdapter == null) {
+        if (this.mBluetoothAdapter == null) {
             promise.resolve("unsupported");
             return;
         }
 
-        int state = mBluetoothAdapter.getState();
+        int stat = this.mBluetoothAdapter.getState();
         String stateString;
 
-        switch (state) {
+        switch (stat) {
             case BluetoothAdapter.STATE_ON:
                 stateString = "poweredOn";
                 break;
@@ -330,6 +224,10 @@ public class RNBlePeripheral extends ReactContextBaseJavaModule {
     @ReactMethod
     public void respond(String requestId, String status, String value, Promise promise){
         try {
+            if(this.state.connectedDevice == null){
+                promise.reject("No device connected");
+                return;
+            }
             int reqId = Integer.parseInt(requestId);
             int stat = BluetoothGatt.GATT_FAILURE;
             if(status.equals("success")){
@@ -337,24 +235,105 @@ public class RNBlePeripheral extends ReactContextBaseJavaModule {
             }
             if(value != null){
                 byte[] val = Base64.decode(value, Base64.DEFAULT);
-                state.gattServer.sendResponse(state.connectedDevice, reqId, stat, 0, val);
+                this.state.gattServer.sendResponse(this.state.connectedDevice, reqId, stat, 0, val);
             } else {
-                state.gattServer.sendResponse(state.connectedDevice, reqId, stat, 0, null);
+                this.state.gattServer.sendResponse(this.state.connectedDevice, reqId, stat, 0, null);
             }
             promise.resolve(null);
         } catch(Exception ex) {
             promise.reject(ex);
         }
     }
-
+    
     @ReactMethod
     public void addService(ReadableMap serviceMap, Promise promise) {
         try{
-            GattServerCallback gattServerCallback = new GattServerCallback();
-            state.bluetoothManager = (BluetoothManager) this.context.getApplicationContext().getSystemService(Context.BLUETOOTH_SERVICE);
+            this.gattServerCallback = new BluetoothGattServerCallback() {
+                @Override
+                public void onConnectionStateChange(BluetoothDevice device, int status, int newState) {
+                    super.onConnectionStateChange(device, status, newState);
+                    boolean isSuccess = status == BluetoothGatt.GATT_SUCCESS;
+                    boolean isConnected = newState == BluetoothProfile.STATE_CONNECTED;
+                    __log("OnConnectionStateChange isSuccess: " + isSuccess + " isConnected: " + isConnected);
+                    if (isSuccess && isConnected) {
+                        __log("Connected to device ");
+                        state.isConnected = true;
+                        state.connectedDevice = device;
+                        // setCurrentDeviceConnected(device);
+        
+                        WritableMap eventParams = Arguments.createMap();
+                        eventParams.putString("message", "device is connected");
+                        sendEvent(STATE_CHANGED, eventParams);
+        
+                    } else {
+                        _deviceConnection.postValue(false);
+                    }
+                }
+        
+                @Override
+                public void onCharacteristicReadRequest(BluetoothDevice device, int requestId, int offset, BluetoothGattCharacteristic characteristic) {
+                    super.onCharacteristicReadRequest(device, requestId, offset, characteristic);
+                    __log("Characteristic read request");
+                    WritableMap eventParams = Arguments.createMap();
+                    eventParams.putString("requestId", Integer.toString(requestId));
+                    eventParams.putString("characteristicUuid", characteristic.getUuid().toString());
+                    eventParams.putInt("offset", offset);
+        
+                    sendEvent(READ_REQUEST, eventParams);
+                    state.gattServer.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, characteristic.getValue());
+                }
+        
+                @Override
+                public void onCharacteristicWriteRequest(BluetoothDevice device, int requestId, BluetoothGattCharacteristic characteristic, boolean preparedWrite, boolean responseNeeded, int offset, byte[] value) {
+                    super.onCharacteristicWriteRequest(device, requestId, characteristic, preparedWrite, responseNeeded, offset, value);
+                    WritableMap eventParams = Arguments.createMap();
+                    eventParams.putString("requestId", Integer.toString(requestId));
+                    eventParams.putString("characteristicUuid", characteristic.getUuid().toString());
+                    eventParams.putString("value", Base64.encodeToString(value, Base64.NO_WRAP));
+                    eventParams.putInt("offset", offset);
+                    sendEvent(WRITE_REQUEST, eventParams);
+                }
+        
+                @Override
+                public void onDescriptorWriteRequest(BluetoothDevice device, int requestId, BluetoothGattDescriptor descriptor, boolean preparedWrite, boolean responseNeeded, int offset, byte[] value) {
+                    super.onDescriptorWriteRequest(device, requestId, descriptor, preparedWrite, responseNeeded, offset, value);
+                    
+                    WritableMap eventParams = Arguments.createMap();
+                    eventParams.putString("characteristicUuid", descriptor.getUuid().toString());
+                    eventParams.putString("centralUuid", device.toString());
+                    if (Arrays.equals(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE, value)) {
+                        sendEvent(SUBSCRIBED, eventParams);
+                    } else if (Arrays.equals(BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE, value)) {
+                        sendEvent(UNSUBSCRIBED, eventParams);
+                    }
+                    state.gattServer.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null);
+                }
+        
+                @Override
+                public void onNotificationSent(BluetoothDevice device, int status){
+                    super.onNotificationSent(device, status);
+                    try {
+                        __log( "Notification sent, " + status);
+                        state.isComplete = true;
+                    } catch(Exception e) {
+                        __log( "Error catch onNotificationSent");
+                    }
+                }
+        
+                /*** */
+                @Override
+                public void onMtuChanged(BluetoothDevice device, int mtu){
+                    super.onMtuChanged(device, mtu);
+        
+                    __log("Negociated Mtu: " + mtu);
+                    state.negociatedMtu = mtu;
+                }
+        
+            };
+            this.state.bluetoothManager = (BluetoothManager) this.context.getApplicationContext().getSystemService(Context.BLUETOOTH_SERVICE);
             __log("setupGattServer");
-            state.gattServer = state.bluetoothManager.openGattServer(this.context, gattServerCallback);
-            if (state.gattServer == null) {
+            this.state.gattServer = this.state.bluetoothManager.openGattServer(this.context, this.gattServerCallback);
+            if (this.state.gattServer == null) {
                 __log("COULD NOT OPEN GATT SERVER");
             } else {
 
@@ -420,8 +399,8 @@ public class RNBlePeripheral extends ReactContextBaseJavaModule {
                         bluetoothGattService.addCharacteristic(bluetoothGattCharacteristic);
                     }
                 }
-                state.gattServer.addService(bluetoothGattService);
-                state.SERVICE_UUID = serviceUuid;
+                this.state.gattServer.addService(bluetoothGattService);
+                this.state.SERVICE_UUID = serviceUuid;
                 __log("setupGattServer finished");
             }
             promise.resolve(null);
@@ -436,8 +415,10 @@ public class RNBlePeripheral extends ReactContextBaseJavaModule {
     @ReactMethod
     public void removeAllServices(Promise promise) {
         try {
-            if (state.gattServer != null) {
-                state.gattServer.clearServices();
+            if (this.state.gattServer != null) {
+                this.state.gattServer.clearServices();
+                __log("Resetting variables ............");
+                this.reset();
                 promise.resolve(null);
             } else {
                 promise.reject("No Gatt Server found");
@@ -506,9 +487,9 @@ public class RNBlePeripheral extends ReactContextBaseJavaModule {
     private void stopAdvertising(Promise promise) {
         __log("Stop advertising called");
         if(this.mBluetoothAdvertiser != null && this.advertiseCallback != null) {
+            this.state.isAdvertising = false;
             this.mBluetoothAdvertiser.stopAdvertising(this.advertiseCallback);
             this.advertiseCallback = null;
-            state.isAdvertising = false;
             promise.resolve(null);
         }
         else{
@@ -519,17 +500,13 @@ public class RNBlePeripheral extends ReactContextBaseJavaModule {
     @ReactMethod
     public void isAdvertising(Promise promise) {
         // Resolve the promise with the current advertising state
-        promise.resolve(state.isAdvertising);
+        promise.resolve(this.state.isAdvertising);
     }
 
     @ReactMethod
-    public void getIsDeviceConnected(Callback callback, Callback callback2) {
-        callback.invoke(state.isConnected);
-    }
-    @ReactMethod
     public void notify(String uuid, String message, Promise promise) {
         __log("Notifying from native module");
-        BluetoothGattService srvc = state.gattServer.getService(state.SERVICE_UUID);
+        BluetoothGattService srvc = this.state.gattServer.getService(this.state.SERVICE_UUID);
         if (srvc == null) {
             __log("Service not found");
             promise.reject("Service not found");
@@ -542,17 +519,22 @@ public class RNBlePeripheral extends ReactContextBaseJavaModule {
             return;
         }
         try {
-            while(!state.isComplete){
+            while(!this.state.isComplete){
 
             }
             if(message == null){
                 promise.reject("Message is null");
+                return;
+            }
+            if(this.state.connectedDevice == null){
+                promise.reject("No device connected");
+                return;
             }
             __log("Message to send: " + message);
             byte[] value = Base64.decode(message, Base64.DEFAULT);
             ch.setValue(value);
-            state.isComplete = false;
-            boolean success = state.gattServer.notifyCharacteristicChanged(state.connectedDevice, ch, false);
+            this.state.isComplete = false;
+            boolean success = this.state.gattServer.notifyCharacteristicChanged(this.state.connectedDevice, ch, false);
             promise.resolve(success);
         } catch(Exception ex) {
             __log("Error sending notification.....");
