@@ -34,7 +34,6 @@ import androidx.lifecycle.LiveData;
 import androidx.lifecycle.MutableLiveData;
 import java.lang.reflect.Method;
 import java.nio.file.ProviderMismatchException;
-import java.lang.String;
 import java.io.UnsupportedEncodingException;
 
 import java.sql.Timestamp;
@@ -49,7 +48,7 @@ public class RNBlePeripheral extends ReactContextBaseJavaModule {
     public static final String UNSUBSCRIBED = "BlePeripheral:Unsubscribed";
     public static final String WRITE_REQUEST = "BlePeripheral:WriteRequest";
     public static final String LOGGER = "BlePeripheral:Logger";
-    private final UUID descriptor_uuid = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb");
+    private final UUID descriptorUuid = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb");
 
     private ReactContext ctx;
     private Context context;
@@ -60,7 +59,7 @@ public class RNBlePeripheral extends ReactContextBaseJavaModule {
     private AdvertiseCallback advertiseCallback;
 
 
-    private MutableLiveData _deviceConnection = new MutableLiveData<Boolean>();
+    private MutableLiveData deviceConnection = new MutableLiveData<Boolean>();
 
 
     
@@ -70,10 +69,19 @@ public class RNBlePeripheral extends ReactContextBaseJavaModule {
         BluetoothDevice connectedDevice = null;
         BluetoothGattServer gattServer;
         Callback callback = null;
-        UUID SERVICE_UUID = null;
+        UUID serviceUuid = null;
         int negociatedMtu = 23;
         boolean isComplete = true;
         BluetoothManager bluetoothManager = null;
+    }
+
+    private void sleepWithDelay(Promise promise) {
+        try {
+            Thread.sleep(100); // Add a small delay to prevent busy-waiting
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            promise.reject("Thread interrupted", e);
+        }
     }
 
     private State state = null;
@@ -162,21 +170,14 @@ public class RNBlePeripheral extends ReactContextBaseJavaModule {
         return permissionFlags;
     }
 
-    private void setCurrentDeviceConnected(BluetoothDevice device) {
-        _deviceConnection.postValue(true);
-        // this.gattClientCallback = new GattClientCallback();
-        // this.gattClient = device.connectGatt(this.context, false, this.gattClientCallback);
-        __log("Connecting to device.....");
-    }
-
     @ReactMethod
     public void addListener(String eventName) {
-
+        // This method is required for React Native's event emitter but is not used in this module.
     }
 
     @ReactMethod
     public void removeListeners(Integer count) {
-
+        // This method is required for React Native's event emitter but is not used in this module.
     }
 
     @ReactMethod
@@ -247,169 +248,196 @@ public class RNBlePeripheral extends ReactContextBaseJavaModule {
     
     @ReactMethod
     public void addService(ReadableMap serviceMap, Promise promise) {
-        try{
-            this.gattServerCallback = new BluetoothGattServerCallback() {
-                @Override
-                public void onConnectionStateChange(BluetoothDevice device, int status, int newState) {
-                    super.onConnectionStateChange(device, status, newState);
-                    boolean isSuccess = status == BluetoothGatt.GATT_SUCCESS;
-                    boolean isConnected = newState == BluetoothProfile.STATE_CONNECTED;
-                    __log("OnConnectionStateChange isSuccess: " + isSuccess + " isConnected: " + isConnected);
-                    if (isSuccess && isConnected) {
-                        __log("Connected to device ");
-                        state.isConnected = true;
-                        state.connectedDevice = device;
-                        // setCurrentDeviceConnected(device);
-        
-                        WritableMap eventParams = Arguments.createMap();
-                        eventParams.putString("message", "device is connected");
-                        sendEvent(STATE_CHANGED, eventParams);
-        
-                    } else {
-                        _deviceConnection.postValue(false);
-                    }
-                }
-        
-                @Override
-                public void onCharacteristicReadRequest(BluetoothDevice device, int requestId, int offset, BluetoothGattCharacteristic characteristic) {
-                    super.onCharacteristicReadRequest(device, requestId, offset, characteristic);
-                    __log("Characteristic read request");
-                    WritableMap eventParams = Arguments.createMap();
-                    eventParams.putString("requestId", Integer.toString(requestId));
-                    eventParams.putString("characteristicUuid", characteristic.getUuid().toString());
-                    eventParams.putInt("offset", offset);
-        
-                    sendEvent(READ_REQUEST, eventParams);
-                    state.gattServer.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, characteristic.getValue());
-                }
-        
-                @Override
-                public void onCharacteristicWriteRequest(BluetoothDevice device, int requestId, BluetoothGattCharacteristic characteristic, boolean preparedWrite, boolean responseNeeded, int offset, byte[] value) {
-                    super.onCharacteristicWriteRequest(device, requestId, characteristic, preparedWrite, responseNeeded, offset, value);
-                    WritableMap eventParams = Arguments.createMap();
-                    eventParams.putString("requestId", Integer.toString(requestId));
-                    eventParams.putString("characteristicUuid", characteristic.getUuid().toString());
-                    eventParams.putString("value", Base64.encodeToString(value, Base64.NO_WRAP));
-                    eventParams.putInt("offset", offset);
-                    sendEvent(WRITE_REQUEST, eventParams);
-                }
-        
-                @Override
-                public void onDescriptorWriteRequest(BluetoothDevice device, int requestId, BluetoothGattDescriptor descriptor, boolean preparedWrite, boolean responseNeeded, int offset, byte[] value) {
-                    super.onDescriptorWriteRequest(device, requestId, descriptor, preparedWrite, responseNeeded, offset, value);
-                    
-                    WritableMap eventParams = Arguments.createMap();
-                    eventParams.putString("characteristicUuid", descriptor.getUuid().toString());
-                    eventParams.putString("centralUuid", device.toString());
-                    if (Arrays.equals(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE, value)) {
-                        sendEvent(SUBSCRIBED, eventParams);
-                    } else if (Arrays.equals(BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE, value)) {
-                        sendEvent(UNSUBSCRIBED, eventParams);
-                    }
-                    state.gattServer.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null);
-                }
-        
-                @Override
-                public void onNotificationSent(BluetoothDevice device, int status){
-                    super.onNotificationSent(device, status);
-                    try {
-                        __log( "Notification sent, " + status);
-                        state.isComplete = true;
-                    } catch(Exception e) {
-                        __log( "Error catch onNotificationSent");
-                    }
-                }
-        
-                /*** */
-                @Override
-                public void onMtuChanged(BluetoothDevice device, int mtu){
-                    super.onMtuChanged(device, mtu);
-        
-                    __log("Negociated Mtu: " + mtu);
-                    state.negociatedMtu = mtu;
-                }
-        
-            };
-            this.state.bluetoothManager = (BluetoothManager) this.context.getApplicationContext().getSystemService(Context.BLUETOOTH_SERVICE);
-            __log("setupGattServer");
-            this.state.gattServer = this.state.bluetoothManager.openGattServer(this.context, this.gattServerCallback);
+        try {
+            setupGattServer();
             if (this.state.gattServer == null) {
                 __log("COULD NOT OPEN GATT SERVER");
-            } else {
-
-                __log("Setting up Service");
-                // Extract properties from the ReadableMap
-                String uuidString = serviceMap.getString("uuid");
-                UUID serviceUuid = UUID.fromString(uuidString);
-                BluetoothGattService bluetoothGattService = new BluetoothGattService(serviceUuid, BluetoothGattService.SERVICE_TYPE_PRIMARY);
-
-                // Handle characteristics
-                if (serviceMap.hasKey("characteristics")) {
-                    ReadableArray characteristicsArray = serviceMap.getArray("characteristics");
-                    for (int i = 0; i < characteristicsArray.size(); i++) {
-                        ReadableMap characteristicMap = characteristicsArray.getMap(i);
-                        String characteristicUuidString = characteristicMap.getString("uuid");
-                        String characteristicValue = null;
-                        if (characteristicMap.hasKey("value")){
-                            characteristicValue = characteristicMap.getString("value");
-                        }
-                        ReadableArray permissionsArray = characteristicMap.hasKey("permissions") ? characteristicMap.getArray("permissions") : null;
-                        ReadableArray propertiesArray = characteristicMap.hasKey("properties") ? characteristicMap.getArray("properties") : null;
-
-                        List<String> permissions = new ArrayList<>();
-                        List<String> properties = new ArrayList<>();
-
-                        boolean isNotificationEnabled = false;
-
-                        if (permissionsArray != null) {
-                            for (int j = 0; j < permissionsArray.size(); j++) {
-                                permissions.add(permissionsArray.getString(j));
-                            }
-                        }
-
-                        if (propertiesArray != null) {
-                            for (int j = 0; j < propertiesArray.size(); j++) {
-                                properties.add(propertiesArray.getString(j));
-                                if(propertiesArray.getString(j) != null && propertiesArray.getString(j).equals("notify")){
-                                    isNotificationEnabled = true;
-                                }
-                            }
-                        }
-
-                        int propertyFlags = getPropertyFlags(properties);
-                        int permissionFlags = getPermissionFlags(permissions);
-
-                        BluetoothGattCharacteristic bluetoothGattCharacteristic = new BluetoothGattCharacteristic(
-                            UUID.fromString(characteristicUuidString),
-                            propertyFlags,
-                            permissionFlags);
-                        
-                        if (characteristicValue != null) {
-                            // Convert base64 string to byte array
-                            byte[] valueBytes = Base64.decode(characteristicValue, Base64.DEFAULT);
-                            bluetoothGattCharacteristic.setValue(valueBytes);
-                        }
-                        if (isNotificationEnabled) {
-                            bluetoothGattCharacteristic.addDescriptor(new BluetoothGattDescriptor(
-                                descriptor_uuid,
-                                BluetoothGattDescriptor.PERMISSION_WRITE
-                            ));
-                        }
-
-                        bluetoothGattService.addCharacteristic(bluetoothGattCharacteristic);
-                    }
-                }
-                this.state.gattServer.addService(bluetoothGattService);
-                this.state.SERVICE_UUID = serviceUuid;
-                __log("setupGattServer finished");
+                promise.reject("GattServerError", "Could not open GATT server");
+                return;
             }
+            __log("Setting up Service");
+            BluetoothGattService bluetoothGattService = createBluetoothGattService(serviceMap);
+            this.state.gattServer.addService(bluetoothGattService);
+            this.state.serviceUuid = bluetoothGattService.getUuid();
+            __log("setupGattServer finished");
             promise.resolve(null);
-        }
-        catch(Exception ex){
+        } catch (Exception ex) {
             __log("Error setting up service");
             __log(ex.getMessage());
             promise.reject(ex);
         }
+    }
+
+    private void setupGattServer() {
+        this.gattServerCallback = new BluetoothGattServerCallback() {
+            @Override
+            public void onConnectionStateChange(BluetoothDevice device, int status, int newState) {
+                super.onConnectionStateChange(device, status, newState);
+                handleConnectionStateChange(device, status, newState);
+            }
+
+            @Override
+            public void onCharacteristicReadRequest(BluetoothDevice device, int requestId, int offset, BluetoothGattCharacteristic characteristic) {
+                super.onCharacteristicReadRequest(device, requestId, offset, characteristic);
+                handleCharacteristicReadRequest(device, requestId, offset, characteristic);
+            }
+
+            @Override
+            public void onCharacteristicWriteRequest(BluetoothDevice device, int requestId, BluetoothGattCharacteristic characteristic, boolean preparedWrite, boolean responseNeeded, int offset, byte[] value) {
+                super.onCharacteristicWriteRequest(device, requestId, characteristic, preparedWrite, responseNeeded, offset, value);
+                handleCharacteristicWriteRequest(device, requestId, characteristic, preparedWrite, responseNeeded, offset, value);
+            }
+
+            @Override
+            public void onDescriptorWriteRequest(BluetoothDevice device, int requestId, BluetoothGattDescriptor descriptor, boolean preparedWrite, boolean responseNeeded, int offset, byte[] value) {
+                super.onDescriptorWriteRequest(device, requestId, descriptor, preparedWrite, responseNeeded, offset, value);
+                handleDescriptorWriteRequest(device, requestId, descriptor, preparedWrite, responseNeeded, offset, value);
+            }
+
+            @Override
+            public void onNotificationSent(BluetoothDevice device, int status) {
+                super.onNotificationSent(device, status);
+                handleNotificationSent(device, status);
+            }
+
+            @Override
+            public void onMtuChanged(BluetoothDevice device, int mtu) {
+                super.onMtuChanged(device, mtu);
+                handleMtuChanged(device, mtu);
+            }
+        };
+        this.state.bluetoothManager = (BluetoothManager) this.context.getApplicationContext().getSystemService(Context.BLUETOOTH_SERVICE);
+        __log("setupGattServer");
+        this.state.gattServer = this.state.bluetoothManager.openGattServer(this.context, this.gattServerCallback);
+    }
+
+    private BluetoothGattService createBluetoothGattService(ReadableMap serviceMap) {
+        String uuidString = serviceMap.getString("uuid");
+        UUID serviceUuid = UUID.fromString(uuidString);
+        BluetoothGattService bluetoothGattService = new BluetoothGattService(serviceUuid, BluetoothGattService.SERVICE_TYPE_PRIMARY);
+
+        if (serviceMap.hasKey("characteristics")) {
+            ReadableArray characteristicsArray = serviceMap.getArray("characteristics");
+            for (int i = 0; i < characteristicsArray.size(); i++) {
+                ReadableMap characteristicMap = characteristicsArray.getMap(i);
+                BluetoothGattCharacteristic characteristic = createBluetoothGattCharacteristic(characteristicMap);
+                bluetoothGattService.addCharacteristic(characteristic);
+            }
+        }
+        return bluetoothGattService;
+    }
+
+    private BluetoothGattCharacteristic createBluetoothGattCharacteristic(ReadableMap characteristicMap) {
+        String characteristicUuidString = characteristicMap.getString("uuid");
+        String characteristicValue = characteristicMap.hasKey("value") ? characteristicMap.getString("value") : null;
+        ReadableArray permissionsArray = characteristicMap.hasKey("permissions") ? characteristicMap.getArray("permissions") : null;
+        ReadableArray propertiesArray = characteristicMap.hasKey("properties") ? characteristicMap.getArray("properties") : null;
+
+        List<String> permissions = new ArrayList<>();
+        List<String> properties = new ArrayList<>();
+        boolean isNotificationEnabled = false;
+
+        if (permissionsArray != null) {
+            for (int j = 0; j < permissionsArray.size(); j++) {
+                permissions.add(permissionsArray.getString(j));
+            }
+        }
+
+        if (propertiesArray != null) {
+            for (int j = 0; j < propertiesArray.size(); j++) {
+                properties.add(propertiesArray.getString(j));
+                if (propertiesArray.getString(j) != null && propertiesArray.getString(j).equals("notify")) {
+                    isNotificationEnabled = true;
+                }
+            }
+        }
+
+        int propertyFlags = getPropertyFlags(properties);
+        int permissionFlags = getPermissionFlags(permissions);
+
+        BluetoothGattCharacteristic bluetoothGattCharacteristic = new BluetoothGattCharacteristic(
+                UUID.fromString(characteristicUuidString),
+                propertyFlags,
+                permissionFlags);
+
+        if (characteristicValue != null) {
+            byte[] valueBytes = Base64.decode(characteristicValue, Base64.DEFAULT);
+            bluetoothGattCharacteristic.setValue(valueBytes);
+        }
+
+        if (isNotificationEnabled) {
+            bluetoothGattCharacteristic.addDescriptor(new BluetoothGattDescriptor(
+                    descriptorUuid,
+                    BluetoothGattDescriptor.PERMISSION_WRITE
+            ));
+        }
+
+        return bluetoothGattCharacteristic;
+    }
+
+    private void handleConnectionStateChange(BluetoothDevice device, int status, int newState) {
+        boolean isSuccess = status == BluetoothGatt.GATT_SUCCESS;
+        boolean isConnected = newState == BluetoothProfile.STATE_CONNECTED;
+        __log("OnConnectionStateChange isSuccess: " + isSuccess + " isConnected: " + isConnected);
+        if (isSuccess && isConnected) {
+            __log("Connected to device ");
+            state.isConnected = true;
+            state.connectedDevice = device;
+            WritableMap eventParams = Arguments.createMap();
+            eventParams.putString("message", "device is connected");
+            sendEvent(STATE_CHANGED, eventParams);
+        } else {
+            deviceConnection.postValue(false);
+        }
+    }
+
+    private void handleCharacteristicReadRequest(BluetoothDevice device, int requestId, int offset, BluetoothGattCharacteristic characteristic) {
+        __log("Characteristic read request");
+        WritableMap eventParams = Arguments.createMap();
+        eventParams.putString("requestId", Integer.toString(requestId));
+        eventParams.putString("characteristicUuid", characteristic.getUuid().toString());
+        eventParams.putInt("offset", offset);
+        sendEvent(READ_REQUEST, eventParams);
+        state.gattServer.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, characteristic.getValue());
+    }
+
+    private void handleCharacteristicWriteRequest(BluetoothDevice device, int requestId, BluetoothGattCharacteristic characteristic, boolean preparedWrite, boolean responseNeeded, int offset, byte[] value) {
+        (void)device;
+        (void)preparedWrite;
+        (void)responseNeeded;
+
+        WritableMap eventParams = Arguments.createMap();
+        eventParams.putString("requestId", Integer.toString(requestId));
+        eventParams.putString("characteristicUuid", characteristic.getUuid().toString());
+        eventParams.putString("value", Base64.encodeToString(value, Base64.NO_WRAP));
+        eventParams.putInt("offset", offset);
+        sendEvent(WRITE_REQUEST, eventParams);
+    }
+
+    private void handleDescriptorWriteRequest(BluetoothDevice device, int requestId, BluetoothGattDescriptor descriptor, boolean preparedWrite, boolean responseNeeded, int offset, byte[] value) {
+        WritableMap eventParams = Arguments.createMap();
+        eventParams.putString("characteristicUuid", descriptor.getUuid().toString());
+        eventParams.putString("centralUuid", device.toString());
+        if (Arrays.equals(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE, value)) {
+            sendEvent(SUBSCRIBED, eventParams);
+        } else if (Arrays.equals(BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE, value)) {
+            sendEvent(UNSUBSCRIBED, eventParams);
+        }
+        state.gattServer.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null);
+    }
+
+    private void handleNotificationSent(BluetoothDevice device, int status) {
+        try {
+            __log("Notification sent, " + status);
+            state.isComplete = true;
+        } catch (Exception e) {
+            __log("Error catch onNotificationSent");
+        }
+    }
+
+    private void handleMtuChanged(BluetoothDevice device, int mtu) {
+        __log("Negociated Mtu: " + mtu);
+        state.negociatedMtu = mtu;
     }
 
     @ReactMethod
@@ -431,8 +459,6 @@ public class RNBlePeripheral extends ReactContextBaseJavaModule {
     @ReactMethod
     public void startAdvertising(ReadableMap data, Promise promise) {
         __log("Start advertisement called");
-        // Retrieve the device name and service UUIDs from the input object
-        String deviceName = data.getString("name");
         ReadableArray serviceUuidsArray = data.getArray("serviceUuids");
 
         // Set up the advertisement settings
@@ -448,8 +474,6 @@ public class RNBlePeripheral extends ReactContextBaseJavaModule {
                                                 // NOTE: This can fail if device name is too long
                 .setIncludeTxPowerLevel(true); // Optionally include TX power level
 
-        // Add service UUIDs to the advertisement data
-        List<ParcelUuid> uuids = new ArrayList<>();
         for (int i = 0; i < serviceUuidsArray.size(); i++) {
             String uuidString = serviceUuidsArray.getString(i);
             UUID uuid = UUID.fromString(uuidString);
@@ -506,7 +530,7 @@ public class RNBlePeripheral extends ReactContextBaseJavaModule {
     @ReactMethod
     public void notify(String uuid, String message, Promise promise) {
         __log("Notifying from native module");
-        BluetoothGattService srvc = this.state.gattServer.getService(this.state.SERVICE_UUID);
+        BluetoothGattService srvc = this.state.gattServer.getService(this.state.serviceUuid);
         if (srvc == null) {
             __log("Service not found");
             promise.reject("Service not found");
@@ -520,7 +544,7 @@ public class RNBlePeripheral extends ReactContextBaseJavaModule {
         }
         try {
             while(!this.state.isComplete){
-
+                sleepWithDelay(promise);
             }
             if(message == null){
                 promise.reject("Message is null");
