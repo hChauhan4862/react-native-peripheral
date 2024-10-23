@@ -15,7 +15,6 @@ const STATE_CHANGED = "BlePeripheral:StateChanged"
 const SUBSCRIBED = "BlePeripheral:Subscribed"
 const UNSUBSCRIBED = "BlePeripheral:Unsubscribed"
 const WRITE_REQUEST = "BlePeripheral:WriteRequest"
-const LOGGER = "BlePeripheral:Logger"
 
 export default class Manager {
   private characteristics: { [uuid: string]: Characteristic } = {}
@@ -23,7 +22,6 @@ export default class Manager {
   private subscribeListener?: EventSubscription
   private unsubscribeListener?: EventSubscription
   private writeRequestListener?: EventSubscription
-  private logSubscription?: EventSubscription
 
   constructor() {
     EventEmitter.removeAllListeners(READ_REQUEST)
@@ -31,22 +29,6 @@ export default class Manager {
     EventEmitter.removeAllListeners(SUBSCRIBED)
     EventEmitter.removeAllListeners(UNSUBSCRIBED)
     EventEmitter.removeAllListeners(WRITE_REQUEST)
-    
-    if (Platform.OS === 'android'){
-      EventEmitter.removeAllListeners(LOGGER)
-      // Subscribe to logger event
-      this.logSubscription = EventEmitter.addListener(
-        LOGGER, 
-        (params: {
-          message: string
-        }) => {
-          console.log(params.message); // Log the message received from native module
-        }
-      );
-      RNBlePeripheral.testLog("TESTING LOG FROM RNBlePeripheral");
-    }
-
-    console.log("Called manager constructor ----")
   }
 
   /**

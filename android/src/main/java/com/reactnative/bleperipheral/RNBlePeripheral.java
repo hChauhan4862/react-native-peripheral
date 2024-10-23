@@ -47,7 +47,6 @@ public class RNBlePeripheral extends ReactContextBaseJavaModule {
     public static final String SUBSCRIBED = "BlePeripheral:Subscribed";
     public static final String UNSUBSCRIBED = "BlePeripheral:Unsubscribed";
     public static final String WRITE_REQUEST = "BlePeripheral:WriteRequest";
-    public static final String LOGGER = "BlePeripheral:Logger";
     private final UUID descriptorUuid = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb");
 
     private ReactContext ctx;
@@ -58,10 +57,7 @@ public class RNBlePeripheral extends ReactContextBaseJavaModule {
     private BluetoothGattServerCallback gattServerCallback;
     private AdvertiseCallback advertiseCallback;
 
-
     private MutableLiveData deviceConnection = new MutableLiveData<Boolean>();
-
-
     
     private class State {
         boolean isConnected = false;
@@ -117,12 +113,6 @@ public class RNBlePeripheral extends ReactContextBaseJavaModule {
                 .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class)
                 .emit(eventName, params);
         }
-    }
-
-    private void __log(String message){
-        WritableMap eventParams = Arguments.createMap();
-        eventParams.putString("message", message);
-        sendEvent(LOGGER, eventParams);
     }
 
     private int getPropertyFlags(List<String> properties) {
@@ -181,13 +171,7 @@ public class RNBlePeripheral extends ReactContextBaseJavaModule {
     }
 
     @ReactMethod
-    public void testLog(String logMessage) {
-        __log(logMessage);
-    }
-
-    @ReactMethod
     public void getNegociatedMtu(Promise promise) {
-        __log("getMtu called: " + this.state.negociatedMtu);
         promise.resolve(this.state.negociatedMtu);
     }
 
@@ -251,19 +235,14 @@ public class RNBlePeripheral extends ReactContextBaseJavaModule {
         try {
             setupGattServer();
             if (this.state.gattServer == null) {
-                __log("COULD NOT OPEN GATT SERVER");
                 promise.reject("GattServerError", "Could not open GATT server");
                 return;
             }
-            __log("Setting up Service");
             BluetoothGattService bluetoothGattService = createBluetoothGattService(serviceMap);
             this.state.gattServer.addService(bluetoothGattService);
             this.state.serviceUuid = bluetoothGattService.getUuid();
-            __log("setupGattServer finished");
             promise.resolve(null);
         } catch (Exception ex) {
-            __log("Error setting up service");
-            __log(ex.getMessage());
             promise.reject(ex);
         }
     }
@@ -307,7 +286,6 @@ public class RNBlePeripheral extends ReactContextBaseJavaModule {
             }
         };
         this.state.bluetoothManager = (BluetoothManager) this.context.getApplicationContext().getSystemService(Context.BLUETOOTH_SERVICE);
-        __log("setupGattServer");
         this.state.gattServer = this.state.bluetoothManager.openGattServer(this.context, this.gattServerCallback);
     }
 
@@ -378,9 +356,7 @@ public class RNBlePeripheral extends ReactContextBaseJavaModule {
     private void handleConnectionStateChange(BluetoothDevice device, int status, int newState) {
         boolean isSuccess = status == BluetoothGatt.GATT_SUCCESS;
         boolean isConnected = newState == BluetoothProfile.STATE_CONNECTED;
-        __log("OnConnectionStateChange isSuccess: " + isSuccess + " isConnected: " + isConnected);
         if (isSuccess && isConnected) {
-            __log("Connected to device ");
             state.isConnected = true;
             state.connectedDevice = device;
             WritableMap eventParams = Arguments.createMap();
@@ -392,7 +368,6 @@ public class RNBlePeripheral extends ReactContextBaseJavaModule {
     }
 
     private void handleCharacteristicReadRequest(BluetoothDevice device, int requestId, int offset, BluetoothGattCharacteristic characteristic) {
-        __log("Characteristic read request");
         WritableMap eventParams = Arguments.createMap();
         eventParams.putString("requestId", Integer.toString(requestId));
         eventParams.putString("characteristicUuid", characteristic.getUuid().toString());
@@ -428,15 +403,12 @@ public class RNBlePeripheral extends ReactContextBaseJavaModule {
 
     private void handleNotificationSent(BluetoothDevice device, int status) {
         try {
-            __log("Notification sent, " + status);
             state.isComplete = true;
         } catch (Exception e) {
-            __log("Error catch onNotificationSent");
         }
     }
 
     private void handleMtuChanged(BluetoothDevice device, int mtu) {
-        __log("Negociated Mtu: " + mtu);
         state.negociatedMtu = mtu;
     }
 
@@ -445,7 +417,6 @@ public class RNBlePeripheral extends ReactContextBaseJavaModule {
         try {
             if (this.state.gattServer != null) {
                 this.state.gattServer.clearServices();
-                __log("Resetting variables ............");
                 this.reset();
                 promise.resolve(null);
             } else {
@@ -458,7 +429,6 @@ public class RNBlePeripheral extends ReactContextBaseJavaModule {
 
     @ReactMethod
     public void startAdvertising(ReadableMap data, Promise promise) {
-        __log("Start advertisement called");
         ReadableArray serviceUuidsArray = data.getArray("serviceUuids");
 
         // Set up the advertisement settings
@@ -489,7 +459,6 @@ public class RNBlePeripheral extends ReactContextBaseJavaModule {
                 state.isAdvertising = true;
                 // Successfully started advertising
                 promise.resolve("Advertisement started successfully");
-                __log("Advertisement started correctly");
             }
 
             @Override
@@ -504,12 +473,10 @@ public class RNBlePeripheral extends ReactContextBaseJavaModule {
         this.mBluetoothAdvertiser = this.mBluetoothAdapter.getBluetoothLeAdvertiser();
         this.mBluetoothAdvertiser.startAdvertising(settings, dataToAdvertise, this.advertiseCallback);
         
-        __log("StartAdvertising done ....");
     }
 
     @ReactMethod
     private void stopAdvertising(Promise promise) {
-        __log("Stop advertising called");
         if(this.mBluetoothAdvertiser != null && this.advertiseCallback != null) {
             this.state.isAdvertising = false;
             this.mBluetoothAdvertiser.stopAdvertising(this.advertiseCallback);
@@ -529,16 +496,13 @@ public class RNBlePeripheral extends ReactContextBaseJavaModule {
 
     @ReactMethod
     public void notify(String uuid, String message, Promise promise) {
-        __log("Notifying from native module");
         BluetoothGattService srvc = this.state.gattServer.getService(this.state.serviceUuid);
         if (srvc == null) {
-            __log("Service not found");
             promise.reject("Service not found");
             return;
         }
         BluetoothGattCharacteristic ch = srvc.getCharacteristic(UUID.fromString(uuid));
         if(ch == null){
-            __log("Characteristic not found");
             promise.reject("Characteristic not found");
             return;
         }
@@ -554,14 +518,12 @@ public class RNBlePeripheral extends ReactContextBaseJavaModule {
                 promise.reject("No device connected");
                 return;
             }
-            __log("Message to send: " + message);
             byte[] value = Base64.decode(message, Base64.DEFAULT);
             ch.setValue(value);
             this.state.isComplete = false;
             boolean success = this.state.gattServer.notifyCharacteristicChanged(this.state.connectedDevice, ch, false);
             promise.resolve(success);
         } catch(Exception ex) {
-            __log("Error sending notification.....");
             promise.reject(ex);
         }
     }

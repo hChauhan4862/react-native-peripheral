@@ -4,6 +4,8 @@ React Native library for building BLE peripherals.
 
 _Note:_ If you want to write a BLE Central application (that connects to BLE peripherals such as a watch or heart rate monitor), check out [react-native-ble-plx](https://github.com/Polidea/react-native-ble-plx/) or [react-native-ble-manager](https://github.com/innoveit/react-native-ble-manager/) instead.
 
+## ** This fork implements support for Android
+
 ## Installation
 
 Using npm:
@@ -43,9 +45,7 @@ If you're still managing dependencies through Xcode projects, or if the above di
 <details>
   <summary><b>Android</b></summary>
 
-Android support is not implemented yet.
-
-<!-- #### React Native 0.60 and above
+#### React Native 0.60 and above
 
 Linking is automatic in React Native >=0.60. Nothing to be done here.
 
@@ -66,7 +66,7 @@ If the above didn't work:
 3. Insert the following lines inside the dependencies block in `android/app/build.gradle`:
     ```
       compile project(':react-native-peripheral')
-    ``` -->
+    ```
 
 </details>
 
