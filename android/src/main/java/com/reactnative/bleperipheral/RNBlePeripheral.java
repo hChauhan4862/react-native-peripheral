@@ -264,25 +264,25 @@ public class RNBlePeripheral extends ReactContextBaseJavaModule {
             @Override
             public void onCharacteristicWriteRequest(BluetoothDevice device, int requestId, BluetoothGattCharacteristic characteristic, boolean preparedWrite, boolean responseNeeded, int offset, byte[] value) {
                 super.onCharacteristicWriteRequest(device, requestId, characteristic, preparedWrite, responseNeeded, offset, value);
-                handleCharacteristicWriteRequest(device, requestId, characteristic, preparedWrite, responseNeeded, offset, value);
+                handleCharacteristicWriteRequest(requestId, characteristic, offset, value);
             }
 
             @Override
             public void onDescriptorWriteRequest(BluetoothDevice device, int requestId, BluetoothGattDescriptor descriptor, boolean preparedWrite, boolean responseNeeded, int offset, byte[] value) {
                 super.onDescriptorWriteRequest(device, requestId, descriptor, preparedWrite, responseNeeded, offset, value);
-                handleDescriptorWriteRequest(device, requestId, descriptor, preparedWrite, responseNeeded, offset, value);
+                handleDescriptorWriteRequest(device, requestId, descriptor, value);
             }
 
             @Override
             public void onNotificationSent(BluetoothDevice device, int status) {
                 super.onNotificationSent(device, status);
-                handleNotificationSent(device, status);
+                handleNotificationSent();
             }
 
             @Override
             public void onMtuChanged(BluetoothDevice device, int mtu) {
                 super.onMtuChanged(device, mtu);
-                handleMtuChanged(device, mtu);
+                handleMtuChanged(mtu);
             }
         };
         this.state.bluetoothManager = (BluetoothManager) this.context.getApplicationContext().getSystemService(Context.BLUETOOTH_SERVICE);
@@ -376,11 +376,7 @@ public class RNBlePeripheral extends ReactContextBaseJavaModule {
         state.gattServer.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, characteristic.getValue());
     }
 
-    private void handleCharacteristicWriteRequest(BluetoothDevice device, int requestId, BluetoothGattCharacteristic characteristic, boolean preparedWrite, boolean responseNeeded, int offset, byte[] value) {
-        (void)device;
-        (void)preparedWrite;
-        (void)responseNeeded;
-
+    private void handleCharacteristicWriteRequest(int requestId, BluetoothGattCharacteristic characteristic, int offset, byte[] value) {
         WritableMap eventParams = Arguments.createMap();
         eventParams.putString("requestId", Integer.toString(requestId));
         eventParams.putString("characteristicUuid", characteristic.getUuid().toString());
@@ -389,7 +385,7 @@ public class RNBlePeripheral extends ReactContextBaseJavaModule {
         sendEvent(WRITE_REQUEST, eventParams);
     }
 
-    private void handleDescriptorWriteRequest(BluetoothDevice device, int requestId, BluetoothGattDescriptor descriptor, boolean preparedWrite, boolean responseNeeded, int offset, byte[] value) {
+    private void handleDescriptorWriteRequest(BluetoothDevice device, int requestId, BluetoothGattDescriptor descriptor, byte[] value) {
         WritableMap eventParams = Arguments.createMap();
         eventParams.putString("characteristicUuid", descriptor.getUuid().toString());
         eventParams.putString("centralUuid", device.toString());
@@ -401,14 +397,15 @@ public class RNBlePeripheral extends ReactContextBaseJavaModule {
         state.gattServer.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null);
     }
 
-    private void handleNotificationSent(BluetoothDevice device, int status) {
+    private void handleNotificationSent() {
         try {
             state.isComplete = true;
         } catch (Exception e) {
+            Log.e("RNBlePeripheral", "Error handling notification sent", e);
         }
     }
 
-    private void handleMtuChanged(BluetoothDevice device, int mtu) {
+    private void handleMtuChanged(int mtu) {
         state.negociatedMtu = mtu;
     }
 
